@@ -35,6 +35,11 @@ create-innovation-project-report/
 │   ├── prepare_exploded_view.py
 │   ├── appendix_images.py
 │   └── ...
+├── vendor/
+│   └── humanizer-zh/
+│       ├── SKILL.md
+│       ├── LICENSE
+│       └── references/
 └── tests/
     └── test_*.py
 ```
@@ -67,6 +72,21 @@ python3 ~/.codex/skills/create-innovation-project-report/scripts/check_skill_com
 ```
 
 如果后续版本引入第三方模块，自举脚本会在用户缓存目录创建隔离环境并自动安装，不会修改全局 Python。
+
+报告正文润色依赖 `humanizer-zh`。仓库已随附完整副本和原 MIT 许可证，无需预先联网安装。首次运行时：
+
+1. 当前技能位于标准 `skills` 目录时，自举脚本将 `humanizer-zh` 安装到同级目录。
+2. 目标位置已有可用版本时直接复用，不覆盖。
+3. 目录不可写或已有不兼容版本时，主流程直接读取 `vendor/humanizer-zh/`。
+
+从普通克隆目录运行时，可显式指定 Agent 技能目录：
+
+```bash
+python3 create-innovation-project-report/scripts/bootstrap_runtime.py \
+  --agent-skills-root ~/.codex/skills --json
+```
+
+检查输出中的 `skill_dependencies.humanizer-zh.mode`：`installed` 表示可通过 `$humanizer-zh` 调用，`bundled` 表示使用返回路径中的内置副本。
 
 ## 使用示例
 
@@ -125,6 +145,7 @@ python3 create-innovation-project-report/scripts/check_skill_compatibility.py --
 
 - Python 3.9 洁净环境
 - 首次运行依赖检测和自动安装分支
+- `humanizer-zh` 的内置校验、首次安装、复用和不覆盖分支
 - 爆炸图参数与零件真实性约束
 - 附录图片、题注、替代文本和 OOXML 关系
 - 附图正文互引
@@ -146,3 +167,7 @@ python3 create-innovation-project-report/scripts/check_skill_compatibility.py --
 技能提供无图像生成工具、无 DOCX 专用 Skill、无 LibreOffice 和无数据可视化工具时的降级路径。详细说明见 [`references/compatibility.md`](create-innovation-project-report/references/compatibility.md)。
 
 兼容性检查只能验证当前已安装的 Agent 和公开技能接口，无法对尚未发布的私有接口作永久保证。建议在安装或升级后重新运行兼容性检查。
+
+## 第三方依赖
+
+随附的 [`humanizer-zh`](https://github.com/tianpeng-dev/Humanizer-zh) 采用 MIT License，版权归原作者所有。许可文本保存在 [`vendor/humanizer-zh/LICENSE`](create-innovation-project-report/vendor/humanizer-zh/LICENSE)。

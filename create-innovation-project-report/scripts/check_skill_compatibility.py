@@ -62,11 +62,18 @@ def scan_skill_names(roots: list[Path]) -> tuple[dict[str, list[str]], int]:
     scanned = 0
     seen_paths: set[Path] = set()
     for root in roots:
+        resolved_root = root.resolve()
         for skill_file in root.rglob("SKILL.md"):
             resolved = skill_file.resolve()
             if resolved in seen_paths:
                 continue
             seen_paths.add(resolved)
+            try:
+                relative_parts = resolved.relative_to(resolved_root).parts
+            except ValueError:
+                relative_parts = ()
+            if "vendor" in relative_parts[:-1]:
+                continue
             metadata = parse_frontmatter(skill_file)
             name = metadata.get("name")
             if name:
@@ -191,6 +198,7 @@ def check(skill_root: Path, scan_roots: list[Path], run_help: bool) -> dict:
         "name_collisions": collisions,
         "third_party_modules": third_party,
         "core_is_standard_library_only": not third_party,
+        "skill_dependencies": runtime.get("skill_dependencies", {}),
         "runtime": runtime,
         "errors": errors,
         "warnings": warnings,
@@ -206,6 +214,8 @@ def main() -> int:
         print(f"兼容性: {result['status']}")
         print(f"扫描 Agent Skills: {result.get('agent_skills_scanned', 0)}")
         print("仅使用标准库: " + ("是" if result.get("core_is_standard_library_only") else "否"))
+        for name, dependency in result.get("skill_dependencies", {}).items():
+            print(f"Skill 依赖 {name}: {dependency['mode']}")
         for error in result.get("errors", []):
             print(f"错误: {error}")
         for warning in result.get("warnings", []):

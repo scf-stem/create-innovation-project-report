@@ -14,7 +14,7 @@ description: 基于项目文件夹中的源码、模型、图纸、图片、实�
 - 创建、编辑或检查 DOCX 时，先使用可用的文档处理 Skill，并执行完整渲染检查。
 - 需要重制架构图、流程图、原理图或爆炸图时优先使用 `$imagegen`；若当前 Agent 没有该能力，按兼容性规则改用 CAD 原生导出或规范文件，不中断其余报告工作。
 - 需要清洗结构化实验数据、计算指标或生成数据图时，使用可用的数据分析与可视化 Skill；图表仍须追溯到项目原始数据。
-- 正文稳定后使用 `$humanizer-zh` 润色。保护表格、标题、可自动更新的目录、图表题注、代码、命令、路径、参数和型号。
+- 正文稳定后使用 `humanizer-zh` 润色。该依赖已随附在 `vendor/humanizer-zh/`，首次运行会自动安装；无法写入 Agent 技能目录时直接读取内置副本。保护表格、标题、可自动更新的目录、图表题注、代码、命令、路径、参数和型号。
 
 ## 首次运行与兼容性
 
@@ -25,7 +25,15 @@ python3 <skill-dir>/scripts/bootstrap_runtime.py --json
 python3 <skill-dir>/scripts/check_skill_compatibility.py --json
 ```
 
-读取自举结果中的 `python` 路径，并使用该解释器运行后续脚本。核心脚本仅使用 Python 标准库；若未来规则引入第三方模块，自举脚本会在用户缓存目录创建隔离环境并自动安装，不修改全局 Python。跨 Agent 能力选择和无图像生成、无 LibreOffice 时的降级方式见 [compatibility.md](references/compatibility.md)。
+读取自举结果中的 `python` 路径，并使用该解释器运行后续脚本。核心脚本仅使用 Python 标准库；若未来规则引入第三方模块，自举脚本会在用户缓存目录创建隔离环境并自动安装，不修改全局 Python。
+
+同时读取 `skill_dependencies.humanizer-zh`：
+
+- `mode` 为 `installed`：使用 `$humanizer-zh`。
+- `mode` 为 `bundled`：读取结果中 `path` 指向的 `SKILL.md`，按其中流程及参考文件完成润色。
+- `status` 不是 `ready`：停止润色环节并报告依赖包损坏；不得跳过检查后声称已经完成自然化处理。
+
+自动安装只在当前技能位于标准 `skills` 目录，或调用者通过 `--agent-skills-root` 指定安装位置时执行。目标位置已有其他版本时不覆盖，改用内置副本。跨 Agent 能力选择和无图像生成、无 LibreOffice 时的降级方式见 [compatibility.md](references/compatibility.md)。
 
 ## 开始前固定五项信息
 
@@ -214,6 +222,8 @@ python3 <skill-dir>/scripts/audit_docx.py <report.docx> \
 ### 13. 润色非表格正文
 
 技术内容稳定后再润色。排除表格、标题、目录、图表题注、代码、命令、路径、参数和型号。减少套话和过度修辞，保留技术术语与事实状态。
+
+按首次运行结果调用已安装的 `$humanizer-zh`，或直接读取内置 `humanizer-zh` 的 `SKILL.md` 和所需参考文件。执行其“识别问题—初稿—二次审计—终稿—评分”流程，只改写允许处理的正文段落。内置副本与独立技能使用同一套规则，不能把依赖不可见当作省略润色的理由。
 
 正式报告默认采用客观第三人称或无主语表达。介绍报告内容时使用“本文”，描述项目工作时使用“本项目”，描述方法时使用“本研究”，描述技术对象时直接使用“系统、模块、程序、设备”，描述结果时使用“测试结果表明”“运行记录显示”或“现场观察发现”。除个人总结、团队分工或用户明确要求外，不使用“我”“我们”和“笔者”。
 
