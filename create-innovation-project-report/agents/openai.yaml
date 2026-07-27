@@ -1,0 +1,4 @@
+interface:
+  display_name: "创新项目综合报告"
+  short_description: "根据真实项目资料生成结构清楚、结论准确的中文正式报告"
+  default_prompt: "使用 $create-innovation-project-report 分析当前项目资料并生成一份正式的中文创新项目综合报告 DOCX。"
