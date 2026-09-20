@@ -169,8 +169,9 @@ class RuntimeTest(unittest.TestCase):
                 self.assertTrue({"math", "zlib"}.issubset(stdlib_module_names()))
 
     def test_cache_override_and_platform_defaults(self):
+        fixture_home = Path(tempfile.gettempdir()) / "report-cache-home"
         for system, expected in (("win32", "AppData"), ("darwin", "Caches"), ("linux", ".cache")):
-            with patch.dict(os.environ, {}, clear=True), patch("bootstrap_runtime.sys.platform", system):
+            with patch.dict(os.environ, {}, clear=True), patch("bootstrap_runtime.sys.platform", system), patch("bootstrap_runtime.Path.home", return_value=fixture_home):
                 self.assertIn(expected, str(cache_root()))
         with patch.dict(os.environ, {"REPORT_SKILL_CACHE": tempfile.gettempdir()}):
             self.assertEqual(cache_root(), Path(tempfile.gettempdir()).resolve())
