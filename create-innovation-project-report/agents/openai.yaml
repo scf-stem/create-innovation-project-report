@@ -1,4 +1,4 @@
 interface:
   display_name: "创新项目综合报告"
-  short_description: "根据真实项目资料生成结构清楚、结论准确的中文正式报告"
-  default_prompt: "使用 $create-innovation-project-report 分析当前项目资料并生成一份正式的中文创新项目综合报告 DOCX。"
+  short_description: "按项目资料创建、修订或审查综合报告，支持多场景配置与跨 Agent 使用"
+  default_prompt: "使用 $create-innovation-project-report 按当前项目资料和交付要求选择适用模块，创建、修订或审查综合实践报告。"

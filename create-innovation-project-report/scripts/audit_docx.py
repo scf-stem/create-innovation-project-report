@@ -10,6 +10,7 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+from portable_io import configure_utf8
 from xml.etree import ElementTree as ET
 
 
@@ -26,8 +27,9 @@ METRIC_PATTERNS = (
     re.compile(r"(显著提升|高精度|实时运行|稳定运行|完全满足)"),
 )
 NUMBER_TOKEN = r"(?:[A-Za-z]\s*[-—.]?\s*\d+|\d+(?:\s*[-—.]\s*\d+)?)"
-CAPTION_RE = re.compile(rf"^(附图|图|表)\s*({NUMBER_TOKEN})")
-REFERENCE_RE = re.compile(rf"(附图|图|表)\s*({NUMBER_TOKEN})")
+LABEL_TOKEN = r"(?:附图|图|表|\bAppendix Figure|\bFigure|\bFig\.|\bTable)"
+CAPTION_RE = re.compile(rf"^({LABEL_TOKEN})\s*({NUMBER_TOKEN})", re.I)
+REFERENCE_RE = re.compile(rf"({LABEL_TOKEN})\s*({NUMBER_TOKEN})", re.I)
 PROJECT_REPORT_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9·（）()_-]{2,50}项目综合实践报告)")
 
 
@@ -126,20 +128,26 @@ def package_texts(docx: Path) -> dict[str, str]:
 
 def toc_status(docx: Path) -> dict:
     root = open_xml(docx, "word/document.xml")
-    instructions = [
-        (node.text or "").strip()
-        for node in root.findall(".//w:instrText", NS)
-        if "TOC" in (node.text or "").upper()
-    ]
-    instructions.extend(
-        node.get(f"{{{W_NS}}}instr", "").strip()
-        for node in root.findall(".//w:fldSimple", NS)
-        if "TOC" in node.get(f"{{{W_NS}}}instr", "").upper()
-    )
-    field_types = [
-        node.get(f"{{{W_NS}}}fldCharType", "")
-        for node in root.findall(".//w:fldChar", NS)
-    ]
+    instructions, stack = [], []
+    valid_complex = False
+    simple = [node.get(f"{{{W_NS}}}instr", "").strip() for node in root.findall(".//w:fldSimple", NS)]
+    simple = [value for value in simple if re.match(r"TOC(?:\s|$)", value, re.I)]
+    for node in root.iter():
+        if node.tag == f"{{{W_NS}}}fldChar":
+            kind = node.get(f"{{{W_NS}}}fldCharType", "")
+            if kind == "begin":
+                stack.append({"text": "", "separated": False})
+            elif kind == "separate" and stack:
+                stack[-1]["separated"] = True
+            elif kind == "end" and stack:
+                field = stack.pop()
+                instruction = field["text"].strip()
+                if re.match(r"TOC(?:\s|$)", instruction, re.I):
+                    instructions.append(instruction)
+                    valid_complex = valid_complex or field["separated"]
+        elif node.tag == f"{{{W_NS}}}instrText" and stack and not stack[-1]["separated"]:
+            stack[-1]["text"] += node.text or ""
+    instructions.extend(simple)
     try:
         settings = open_xml(docx, "word/settings.xml")
         update = settings.find(".//w:updateFields", NS)
@@ -151,19 +159,14 @@ def toc_status(docx: Path) -> dict:
         update_fields = False
     return {
         "instructions": instructions,
-        "has_begin_separate_end": all(
-            item in field_types for item in ("begin", "separate", "end")
-        ),
+        "has_begin_separate_end": valid_complex,
         "update_fields": update_fields,
-        "valid": bool(instructions)
-        and (
-            all(item in field_types for item in ("begin", "separate", "end"))
-            or any("TOC" in item.upper() for item in instructions)
-        ),
+        "valid": valid_complex or bool(simple),
     }
 
 
 def normalize_ref(kind: str, number: str) -> str:
+    kind = {"figure": "Figure", "fig.": "Figure", "appendix figure": "Appendix Figure", "table": "Table"}.get(kind.lower(), kind)
     return kind + re.sub(r"\s+", "", number).replace("—", "-").replace(".", "-")
 
 
@@ -336,6 +339,7 @@ def audit(
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     docx = args.docx.expanduser().resolve()
     if not docx.is_file():
@@ -388,7 +392,7 @@ def main() -> int:
             hits = "；".join(f"{term}×{count}" for term, count in result["forbidden_hits"].items())
             print("需复核的元叙事词语: " + hits)
         if result["metric_claim_candidates"]:
-            print("需回查证据的指标或效果表述:")
+            print("需核对原始资料的指标或效果表述:")
             for text in result["metric_claim_candidates"][:20]:
                 print(f"- {text[:180]}")
         identity = result["project_identity"]

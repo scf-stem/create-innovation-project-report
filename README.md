@@ -1,173 +1,86 @@
 # Create Innovation Project Report
 
-一个面向科创、课程实践、工程训练和项目结项场景的 Codex Skill。它能够从项目文件夹中的源码、模型、图纸、图片、实验数据和既有文档出发，生成或迭代正式中文项目综合报告 DOCX。
+将真实项目资料整理为综合实践报告的可移植 Skill。支持软件、硬件、实验研究、数据分析、产品设计及混合项目，适用于项目展示、阶段汇报和结项材料。
 
-技能强调事实可追溯、图文对应和工程边界，不会把文件目录改写成报告，也不会补造准确率、运行速度、测试次数或量产结论。
+默认生成中文 DOCX，并保留客观表述、通俗术语、修订记录、“项目名称_综合实践报告_日期或版本号”的命名和第一章起算页码规则。用户可配置其他语言、篇幅、模板及 Markdown/PDF 交付。核心辅助脚本使用 Python 3.9+ 标准库；报告内容生成、格式导出和页面检查由宿主 Agent 的实际工具完成。
 
-## 核心能力
+## 使用方式
 
-- 自动盘点机械、电路、嵌入式、算法、数据、测试和交付资料
-- 区分当前版本、历史原型、重复文件和教学参考资料
-- 建立内部事实清单，约束“已实现”“实验性设计”和“后续优化”措辞
-- 分析参考 DOCX 的章节结构、内容密度、表格和图片数量
-- 组织项目背景、需求、技术路线、创新点、实验结果和交付成果
-- 生成机械装配爆炸图规范，并支持 CAD、图像生成和示意图三种模式
-- 在报告最后阶段自动插入真实项目图片附录
-- 检查自动目录、项目名称、图表互引、正文缩进和表格一致性
-- 在技术内容稳定后，仅润色非表格正文
-- 渲染 DOCX 并检查图片、表格、分页、字体和页眉页脚
+实际安装内容为仓库内层 `create-innovation-project-report/` 目录。保留整个目录，包括 vendor 中的依赖与许可证。将其复制到当前 Agent 的技能目录，或直接让 Agent 读取目录中的 SKILL.md。
 
-## 目录结构
+支持接入 Codex、Claude Code、Gemini CLI、Cursor、GitHub Copilot，以及具备文件读取能力的其他 Agent。各平台的入口和能力检查见 [Agent 接入说明](create-innovation-project-report/references/agent-adapters.md)。该说明区分已核对的接口与需要在宿主上实际运行的能力。
+
+通用请求示例：
 
 ```text
-create-innovation-project-report/
-├── SKILL.md
-├── agents/
-│   └── openai.yaml
-├── references/
-│   ├── compatibility.md
-│   ├── exploded-view-and-appendix.md
-│   └── ...
-├── scripts/
-│   ├── bootstrap_runtime.py
-│   ├── check_skill_compatibility.py
-│   ├── inventory_project.py
-│   ├── prepare_exploded_view.py
-│   ├── appendix_images.py
-│   └── ...
-├── vendor/
-│   └── humanizer-zh/
-│       ├── SKILL.md
-│       ├── LICENSE
-│       └── references/
-└── tests/
-    └── test_*.py
+读取 create-innovation-project-report/SKILL.md，按当前项目资料生成综合实践报告。
+目标读者为项目评审，使用中文 DOCX，保留现有报告结构。
 ```
 
-仓库根目录的 README 不属于 Skill 安装内容。实际安装时复制内层 `create-innovation-project-report/` 文件夹。
+也可要求只审查、只形成提纲、修订特定章节或补充配图。任务不会自动扩展为完整重写。
 
-## 安装
-
-### Codex
+## 环境检查
 
 ```bash
-git clone https://github.com/scf-stem/create-innovation-project-report.git
-mkdir -p ~/.codex/skills
-cp -R create-innovation-project-report/create-innovation-project-report ~/.codex/skills/
-```
-
-重新开始任务后即可通过 `$create-innovation-project-report` 调用。
-
-### 其他 Agent
-
-将内层技能目录复制到对应 Agent 的 Skills 目录。只要运行环境支持 `SKILL.md` 工作流和 Python 3.9 及以上版本，核心脚本即可运行。
-
-## 首次运行
-
-核心实现只使用 Python 标准库，不要求预装 `python-docx`、Pillow 或 PyYAML。
-
-```bash
-python3 ~/.codex/skills/create-innovation-project-report/scripts/bootstrap_runtime.py --json
-python3 ~/.codex/skills/create-innovation-project-report/scripts/check_skill_compatibility.py --json
-```
-
-如果后续版本引入第三方模块，自举脚本会在用户缓存目录创建隔离环境并自动安装，不会修改全局 Python。
-
-报告正文润色依赖 `humanizer-zh`。仓库已随附完整副本和原 MIT 许可证，无需预先联网安装。首次运行时：
-
-1. 当前技能位于标准 `skills` 目录时，自举脚本将 `humanizer-zh` 安装到同级目录。
-2. 目标位置已有可用版本时直接复用，不覆盖。
-3. 目录不可写或已有不兼容版本时，主流程直接读取 `vendor/humanizer-zh/`。
-
-从普通克隆目录运行时，可显式指定 Agent 技能目录：
-
-```bash
-python3 create-innovation-project-report/scripts/bootstrap_runtime.py \
-  --agent-skills-root ~/.codex/skills --json
-```
-
-检查输出中的 `skill_dependencies.humanizer-zh.mode`：`installed` 表示可通过 `$humanizer-zh` 调用，`bundled` 表示使用返回路径中的内置副本。
-
-## 使用示例
-
-```text
-使用 $create-innovation-project-report，基于当前项目文件夹制作
-《智能温室环境控制系统项目综合实践报告》，输出正式 DOCX。
-```
-
-也可以指定更具体的要求：
-
-```text
-使用 $create-innovation-project-report，分析参考报告的结构和篇幅，
-补充机械爆炸图，并将真实样机照片统一放入附录A。
-```
-
-## 爆炸图流程
-
-先生成清单模板：
-
-```bash
-python3 create-innovation-project-report/scripts/prepare_exploded_view.py --template
-```
-
-填写真实装配来源、零件清单、展开方向、视角、题注和输出位置后运行：
-
-```bash
-python3 create-innovation-project-report/scripts/prepare_exploded_view.py exploded-view.json \
-  --output exploded-view-spec.json \
-  --prompt-output exploded-view-prompt.txt
-```
-
-详细规则见 [`references/exploded-view-and-appendix.md`](create-innovation-project-report/references/exploded-view-and-appendix.md)。
-
-## 附录真实图片
-
-正文应先包含“见附图 A-1”等引用。内容和编号稳定后运行：
-
-```bash
-python3 create-innovation-project-report/scripts/appendix_images.py \
-  report.docx report-with-appendix.docx \
-  --manifest appendix-images.json
-```
-
-清单可配置图片顺序、宽度、最大高度、对齐、分页、题注、说明和替代文本。脚本输出新文件，不覆盖原稿，并保护原有表格内容。
-
-## 测试
-
-```bash
-python3 -m unittest discover \
-  -s create-innovation-project-report/tests -v
-
+python3 create-innovation-project-report/scripts/bootstrap_runtime.py --check-only --json
 python3 create-innovation-project-report/scripts/check_skill_compatibility.py --json
 ```
 
-测试覆盖：
+Windows 可使用 `py -3` 或实际 Python 路径。默认不联网、不安装、不扫描其他 Agent 目录。仅在显式传入 `--install` 时安装；离线时使用 `--offline`。无需预装 python-docx、Pillow 或 PyYAML 来运行本仓库的辅助脚本。
 
-- Python 3.9 洁净环境
-- 首次运行依赖检测和自动安装分支
-- `humanizer-zh` 的内置校验、首次安装、复用和不覆盖分支
-- 爆炸图参数与零件真实性约束
-- 附录图片、题注、替代文本和 OOXML 关系
-- 附图正文互引
-- 重复分页保护
-- 参考报告零依赖分析
-- Agent Skill 名称冲突和元数据检查
+默认读取内置 humanizer-zh；检测到已有有效副本时可复用。非中文任务采用目标语言的编辑规则。升级前使用本地验证，详情见 [运行环境与兼容性](create-innovation-project-report/references/compatibility.md)。
 
-## 报告写作边界
+## 灵活配置
 
-- 文件存在不等于功能已经完成实测。
-- 测试计划和预期结果不能写成实际结果。
-- 模型权重不能单独证明准确率和实时性。
-- 编译通过不能证明硬件运行正常。
-- 生成图只能解释结构和关系，不能替代真实测试证据。
-- 成稿只写项目内容，不加入资料扫描过程、编写口径或内部检查说明。
+```bash
+python3 create-innovation-project-report/scripts/plan_report.py --template --output report-config.json
+python3 create-innovation-project-report/scripts/plan_report.py --config report-config.json --output report-plan.json
+```
 
-## 兼容性
+最小配置：
 
-技能提供无图像生成工具、无 DOCX 专用 Skill、无 LibreOffice 和无数据可视化工具时的降级路径。详细说明见 [`references/compatibility.md`](create-innovation-project-report/references/compatibility.md)。
+```json
+{
+  "schema_version": 1,
+  "project": {"name": "项目名称", "root": "."}
+}
+```
 
-兼容性检查只能验证当前已安装的 Agent 和公开技能接口，无法对尚未发布的私有接口作永久保证。建议在安装或升级后重新运行兼容性检查。
+配置支持项目类型和阶段、任务模式、读者、语言、篇幅、格式、纸张、字体、目录、修订记录、命名、模块开关、离线和渲染要求。字段与路径规则见 [配置与模块接口](create-innovation-project-report/references/configuration.md)。计划文件包含模块输入输出与能力缺口；它本身不是生成完毕的报告。
 
-## 第三方依赖
+模式包括 `create`、`revise`、`audit`、`outline` 和 `visuals`。渲染可设置为 required、preferred 或 skip。缺少必需后端时保留用户目标并明确列出未完成项，不将其他格式冒称为已完成结果。
 
-随附的 [`humanizer-zh`](https://github.com/tianpeng-dev/Humanizer-zh) 采用 MIT License，版权归原作者所有。许可文本保存在 [`vendor/humanizer-zh/LICENSE`](create-innovation-project-report/vendor/humanizer-zh/LICENSE)。
+## 可独立使用的工具
+
+| 脚本 | 用途 |
+|---|---|
+| plan_report.py | 配置校验、任务分流和模块计划 |
+| bootstrap_runtime.py | 默认只读的运行环境检查、显式依赖安装 |
+| check_skill_compatibility.py | 技能结构、引用、语法和命令接口检查 |
+| inventory_project.py | 资料盘点、去重、图片元数据和目录排除 |
+| analyze_reference_docx.py | 参考报告的标题、篇幅、表格和图片分析 |
+| inspect_experiment_data.py | CSV/TSV 质量、数值格式与截断检查 |
+| prepare_exploded_view.py | CAD、图像生成和示意图的爆炸图规范 |
+| appendix_images.py | 真实图片、题注、替代文本和附录互引 |
+| audit_docx.py | 项目名称、目录域、图表引用、缩进和表格比较 |
+
+各工具通过 `--help` 查看参数。图表资料不足时使用结构图、流程图或测试计划，保留实际结果与预期结果的区别。图片附录默认拒绝覆盖任何已有输出文件。
+
+## 扩展结构
+
+`SKILL.md` 保留核心规则及任务路由；`references/` 按场景加载；`scripts/report_config.py` 定义版本化配置；`scripts/plan_report.py` 定义模块契约与组合；`tests/` 验证行为。新增 Agent 通过接入说明和能力声明复用同一核心流程，新增模块通过输入输出契约扩展。组织专用参数放在 `extensions`，不会被核心代码当作命令执行。
+
+## 验证
+
+```bash
+python3 -m unittest discover -s create-innovation-project-report/tests -v
+python3 create-innovation-project-report/scripts/check_skill_compatibility.py --json
+```
+
+测试涵盖原有 DOCX 附录与参考分析，以及任务配置、模式分流、Agent/项目类型组合、离线和只读检测、同名副本、路径带空格与中文、英文图表引用、缺损目录域、输出保护和地区数值格式。
+
+GitHub Actions 提供 Windows、macOS、Linux 与 Python 3.9/3.13 的运行矩阵。配置文件存在不等于远程 CI 已运行；以实际 Actions 结果为准。产品级 Agent 调用、Office 字体和真实分页仍需在相应宿主验证。
+
+## 第三方资源
+
+内置 [humanizer-zh](https://github.com/tianpeng-dev/Humanizer-zh) 保留原 [MIT 许可证](create-innovation-project-report/vendor/humanizer-zh/LICENSE)。其资源仅用于中文正文编辑，项目事实、参数和已确认格式在各语言流程中保持一致。

@@ -11,6 +11,7 @@ import math
 import statistics
 from collections import Counter
 from pathlib import Path
+from portable_io import configure_utf8
 
 
 MISSING = {"", "na", "n/a", "nan", "null", "none", "-", "--"}
@@ -23,6 +24,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--encoding", default="utf-8-sig")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-rows", type=int, default=200_000)
+    parser.add_argument("--decimal-separator", choices=(".", ","), default=".")
+    parser.add_argument("--thousands-separator", default=",", help="Use an empty string to disable grouping")
     return parser.parse_args()
 
 
@@ -43,8 +46,11 @@ def detect_delimiter(sample: str, override: str | None) -> str:
         return ","
 
 
-def to_number(value: str) -> float | None:
-    cleaned = value.strip().replace(",", "")
+def to_number(value: str, decimal_separator: str = ".", thousands_separator: str = ",") -> float | None:
+    cleaned = value.strip()
+    if thousands_separator:
+        cleaned = cleaned.replace(thousands_separator, "")
+    cleaned = cleaned.replace(decimal_separator, ".")
     if cleaned.lower() in MISSING:
         return None
     try:
@@ -54,7 +60,11 @@ def to_number(value: str) -> float | None:
         return None
 
 
-def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows: int) -> dict:
+def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows: int, decimal_separator: str = ".", thousands_separator: str = ",") -> dict:
+    if max_rows < 1:
+        raise ValueError("max_rows must be positive")
+    if decimal_separator not in {".", ","} or len(thousands_separator) > 1 or thousands_separator == decimal_separator:
+        raise ValueError("Decimal and thousands separators must be distinct single characters")
     with path.open("r", encoding=encoding, newline="") as stream:
         sample = stream.read(8192)
         stream.seek(0)
@@ -63,6 +73,8 @@ def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows:
         if not reader.fieldnames:
             raise ValueError("No header row found")
         fieldnames = [name.strip() if name else "" for name in reader.fieldnames]
+        if any(not name for name in fieldnames) or len(set(fieldnames)) != len(fieldnames):
+            raise ValueError("Column headers must be nonempty and unique after trimming")
         values = {name: [] for name in fieldnames}
         row_count = 0
         truncated = False
@@ -72,7 +84,7 @@ def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows:
                 truncated = True
                 break
             row_count += 1
-            if None in row:
+            if None in row or any(value is None for value in row.values()):
                 width_issues += 1
             for original, name in zip(reader.fieldnames, fieldnames):
                 values[name].append((row.get(original) or "").strip())
@@ -82,7 +94,7 @@ def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows:
         data = values[name]
         missing_count = sum(value.lower() in MISSING for value in data)
         nonmissing = [value for value in data if value.lower() not in MISSING]
-        numeric = [number for value in nonmissing if (number := to_number(value)) is not None]
+        numeric = [number for value in nonmissing if (number := to_number(value, decimal_separator, thousands_separator)) is not None]
         numeric_ratio = len(numeric) / len(nonmissing) if nonmissing else 0.0
         item = {
             "name": name,
@@ -108,6 +120,8 @@ def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows:
         "path": str(path.resolve()),
         "sha256": sha256_file(path),
         "encoding": encoding,
+        "decimal_separator": decimal_separator,
+        "thousands_separator": thousands_separator,
         "delimiter": "\\t" if delimiter == "\t" else delimiter,
         "row_count": row_count,
         "column_count": len(fieldnames),
@@ -118,11 +132,12 @@ def inspect(path: Path, encoding: str, delimiter_override: str | None, max_rows:
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     path = args.data.expanduser().resolve()
     if not path.is_file():
         raise SystemExit(f"Data file not found: {path}")
-    data = inspect(path, args.encoding, args.delimiter, args.max_rows)
+    data = inspect(path, args.encoding, args.delimiter, args.max_rows, args.decimal_separator, args.thousands_separator)
     content = json.dumps(data, ensure_ascii=False, indent=2)
     if args.output:
         output = args.output.expanduser().resolve()

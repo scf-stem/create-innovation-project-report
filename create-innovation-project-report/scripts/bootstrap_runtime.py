@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect and, when needed, install Python dependencies in an isolated cache."""
+"""Inspect runtime without side effects; install dependencies only when opted in."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import sysconfig
 import tempfile
 import venv
 from pathlib import Path
+from portable_io import configure_utf8
 
 
 MIN_PYTHON = (3, 9)
@@ -40,6 +41,8 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parent.parent,
     )
     parser.add_argument("--check-only", action="store_true", help="Do not install missing packages")
+    parser.add_argument("--install", action="store_true", help="Opt in to isolated package and bundled skill installation")
+    parser.add_argument("--offline", action="store_true", help="Never download Python packages")
     parser.add_argument(
         "--agent-skills-root",
         type=Path,
@@ -74,7 +77,7 @@ def stdlib_module_names() -> set[str]:
             known.add(path.name)
         elif path.suffix in {".py", ".so"}:
             known.add(path.stem.split(".", 1)[0])
-    dynamic_paths = [stdlib_path / "lib-dynload"]
+    dynamic_paths = [stdlib_path / "lib-dynload", Path(sys.base_prefix) / "DLLs", Path(sys.prefix) / "DLLs"]
     destination_shared = sysconfig.get_config_var("DESTSHARED")
     if destination_shared:
         dynamic_paths.append(Path(destination_shared))
@@ -113,12 +116,19 @@ def missing_modules(modules: list[str], python: Path | None = None) -> list[str]
 
 
 def cache_root() -> Path:
-    override = os.environ.get("CODEX_SKILL_CACHE")
+    override = os.environ.get("REPORT_SKILL_CACHE") or os.environ.get("CODEX_SKILL_CACHE")
     if override:
         return Path(override).expanduser().resolve()
     xdg = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
-    return base / "codex-skills" / "create-innovation-project-report"
+    if xdg:
+        base = Path(xdg).expanduser()
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path.home() / ".cache"
+    return base / "agent-skills" / "create-innovation-project-report"
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -128,12 +138,15 @@ def venv_python(venv_dir: Path) -> Path:
 
 
 def install_missing(modules: list[str]) -> Path:
+    unknown = set(modules) - PACKAGE_MAP.keys()
+    if unknown:
+        raise ValueError("No approved package mapping for: " + ", ".join(sorted(unknown)))
     target = cache_root() / "venv"
     python = venv_python(target)
     if not python.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         venv.EnvBuilder(with_pip=True, clear=False).create(target)
-    packages = [PACKAGE_MAP.get(module, module) for module in modules]
+    packages = [PACKAGE_MAP[module] for module in modules]
     subprocess.run(
         [
             str(python),
@@ -145,6 +158,7 @@ def install_missing(modules: list[str]) -> Path:
             *packages,
         ],
         check=True,
+        timeout=300,
     )
     remaining = missing_modules(modules, python)
     if remaining:
@@ -353,11 +367,14 @@ def capability_matrix() -> dict:
 
 def bootstrap(
     skill_root: Path,
-    check_only: bool,
+    check_only: bool = True,
     agent_skills_root: Path | None = None,
+    offline: bool = False,
 ) -> dict:
     root = skill_root.expanduser().resolve()
     capabilities = capability_matrix()
+    if not (root / "SKILL.md").is_file() or not (root / "scripts").is_dir():
+        return {"status": "invalid", "errors": ["Skill root must contain SKILL.md and scripts/"], "capabilities": capabilities}
     if not capabilities["python"]["compatible"]:
         return {
             "status": "incompatible",
@@ -366,14 +383,21 @@ def bootstrap(
             "capabilities": capabilities,
         }
 
-    third_party = third_party_modules(root)
-    missing = missing_modules(third_party)
+    try:
+        third_party = third_party_modules(root)
+        missing = missing_modules(third_party)
+    except (OSError, SyntaxError, ValueError) as error:
+        return {"status": "invalid", "errors": [str(error)], "capabilities": capabilities}
     selected_python = Path(sys.executable)
     installed = []
-    if missing and not check_only:
-        selected_python = install_missing(missing)
-        installed = [PACKAGE_MAP.get(module, module) for module in missing]
-        missing = missing_modules(third_party, selected_python)
+    errors = []
+    if missing and not check_only and not offline:
+        try:
+            selected_python = install_missing(missing)
+            installed = [PACKAGE_MAP.get(module, module) for module in missing]
+            missing = missing_modules(third_party, selected_python)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            errors.append(str(error))
 
     skill_dependencies = provision_skill_dependencies(
         root,
@@ -392,6 +416,9 @@ def bootstrap(
     )
     return {
         "status": status,
+        "errors": errors + skill_dependency_errors,
+        "offline": offline,
+        "installation_requested": not check_only,
         "skill_root": str(root),
         "python": str(selected_python),
         "third_party_modules": third_party,
@@ -409,11 +436,13 @@ def bootstrap(
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     result = bootstrap(
         args.skill_root,
-        args.check_only,
+        check_only=args.check_only or not args.install,
         agent_skills_root=args.agent_skills_root,
+        offline=args.offline,
     )
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

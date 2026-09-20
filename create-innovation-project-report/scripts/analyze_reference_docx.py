@@ -9,6 +9,7 @@ import re
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
+from portable_io import configure_utf8
 from xml.etree import ElementTree as ET
 
 
@@ -199,6 +200,7 @@ def render_markdown(data: dict) -> str:
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     docx = args.docx.expanduser().resolve()
     if not docx.is_file():
