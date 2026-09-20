@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
+from portable_io import configure_utf8
 
 from image_utils import inspect_image
 
@@ -21,6 +23,8 @@ DEFAULT_EXCLUDED_DIRS = {
     "dist",
     "node_modules",
     "output",
+    "outputs",
+    ".venv",
     "render",
     "renders",
 }
@@ -40,6 +44,16 @@ SOURCE_SUFFIXES = {
     ".java",
     ".js",
     ".ts",
+    ".tsx",
+    ".jsx",
+    ".vue",
+    ".go",
+    ".rs",
+    ".cs",
+    ".kt",
+    ".swift",
+    ".r",
+    ".sql",
     ".sh",
     ".launch",
     ".lua",
@@ -76,6 +90,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--hash", dest="find_duplicates", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--image-metadata", action="store_true", help="Read image width, height, and DPI")
+    parser.add_argument("--exclude-dir", action="append", default=[], help="Additional directory basename to skip")
     return parser.parse_args()
 
 
@@ -112,16 +127,15 @@ def classify_domains(path: Path) -> list[str]:
     return matches or ["未分类"]
 
 
-def iter_files(root: Path, include_output: bool):
-    excluded = set() if include_output else DEFAULT_EXCLUDED_DIRS
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if any(part in excluded for part in path.relative_to(root).parts[:-1]):
-            continue
-        if any(part.startswith(".") for part in path.relative_to(root).parts):
-            continue
-        yield path
+def iter_files(root: Path, include_output: bool, exclude_dirs=(), errors=None):
+    excluded = (set() if include_output else DEFAULT_EXCLUDED_DIRS) | set(exclude_dirs)
+    errors = errors if errors is not None else []
+    for current, directories, names in os.walk(root, followlinks=False, onerror=lambda error: errors.append(str(error))):
+        directories[:] = sorted(name for name in directories if name not in excluded and not name.startswith('.') and not (Path(current) / name).is_symlink())
+        for name in sorted(names):
+            path = Path(current) / name
+            if not name.startswith('.') and not path.is_symlink() and path.is_file():
+                yield path
 
 
 def sha256_file(path: Path) -> str:
@@ -145,18 +159,28 @@ def build_inventory(
     include_output: bool,
     compute_hash: bool,
     include_image_metadata: bool,
+    exclude_dirs=(),
 ) -> dict:
     files = []
-    for path in iter_files(root, include_output):
+    errors = []
+    if not root.is_dir():
+        raise ValueError(f"Project root is not a directory: {root}")
+    for path in iter_files(root, include_output, exclude_dirs, errors):
         relative = path.relative_to(root)
+        try:
+            size = path.stat().st_size
+            digest = sha256_file(path) if compute_hash else None
+        except OSError as error:
+            errors.append(f"{relative}: {error}")
+            continue
         item = {
             "path": relative.as_posix(),
             "type": classify_type(relative),
             "domains": classify_domains(relative),
-            "bytes": path.stat().st_size,
+            "bytes": size,
         }
         if compute_hash:
-            item["sha256"] = sha256_file(path)
+            item["sha256"] = digest
         if include_image_metadata and item["type"] == "图片":
             item["image"] = image_metadata(path)
         files.append(item)
@@ -186,6 +210,8 @@ def build_inventory(
         "unique_content_count": len(files) - duplicate_file_count,
         "duplicate_groups": duplicate_groups,
         "files": files,
+        "warnings": errors,
+        "complete": not errors,
     }
 
 
@@ -242,10 +268,13 @@ def render_markdown(data: dict, limit: int) -> str:
         if len(data["duplicate_groups"]) > limit:
             lines.append(f"| ……另有 {len(data['duplicate_groups']) - limit} 组 |  |")
     lines.append("")
+    if data.get("warnings"):
+        lines.extend(["## 未能读取的资料", "", *[f"- {warning}" for warning in data["warnings"]], ""])
     return "\n".join(lines)
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     root = args.root.expanduser().resolve()
     if not root.is_dir():
@@ -256,6 +285,7 @@ def main() -> int:
         args.include_output,
         compute_hash=args.find_duplicates,
         include_image_metadata=args.image_metadata,
+        exclude_dirs=args.exclude_dir,
     )
     if args.format == "json":
         content = json.dumps(data, ensure_ascii=False, indent=2)

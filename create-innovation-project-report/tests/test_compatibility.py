@@ -57,11 +57,12 @@ class CompatibilityTest(unittest.TestCase):
             self.assertEqual(scanned, 2)
             self.assertEqual(set(names), {"main-skill", "sibling-skill"})
 
-    def test_bootstrap_auto_installs_future_missing_module(self):
+    def test_bootstrap_explicit_install_uses_isolated_python(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             scripts = root / "scripts"
             scripts.mkdir()
+            (root / "SKILL.md").write_text("---\nname: test\ndescription: test\n---\n", encoding="utf-8")
             (scripts / "feature.py").write_text("import imaginary_dependency\n", encoding="utf-8")
             with patch(
                 "bootstrap_runtime.missing_modules",

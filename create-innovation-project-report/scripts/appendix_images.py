@@ -8,6 +8,7 @@ import json
 import re
 import zipfile
 from pathlib import Path
+from portable_io import configure_utf8
 from xml.etree import ElementTree as ET
 
 from image_utils import ImageInfo, inspect_image
@@ -259,11 +260,11 @@ def ensure_content_type(content_types: ET.Element, info: ImageInfo) -> None:
         )
 
 
-def normalize_number(value: str) -> str:
+def normalize_number(value: str, prefix: str = "附图") -> str:
     number = value.strip()
-    if number.startswith("附图"):
+    if number.startswith(prefix):
         return re.sub(r"\s+", " ", number)
-    return f"附图 {number}"
+    return f"{prefix} {number}"
 
 
 def insert_appendix(
@@ -278,6 +279,8 @@ def insert_appendix(
     manifest_file = manifest_path.expanduser().resolve()
     if source == output:
         raise ValueError("Output DOCX must differ from input DOCX")
+    if output.exists():
+        raise FileExistsError(f"Output already exists: {output}")
     if not source.is_file():
         raise FileNotFoundError(source)
     manifest = read_manifest(manifest_file)
@@ -300,6 +303,10 @@ def insert_appendix(
     heading_style = resolve_style_id(styles_root, ("heading 1", "标题 1", "标题1"))
     caption_style = resolve_style_id(styles_root, ("caption", "题注"))
     appendix_title = str(manifest.get("appendix_title", "附录A 项目实物图片")).strip()
+    caption_prefix = str(manifest.get("caption_prefix", "附图")).strip()
+    description_prefix = str(manifest.get("description_prefix", "说明："))
+    if not caption_prefix:
+        raise ValueError("caption_prefix must be nonempty")
     require_references = bool(manifest.get("require_body_references", True))
     if allow_unreferenced:
         require_references = False
@@ -310,7 +317,7 @@ def insert_appendix(
     for index, raw in enumerate(manifest["images"], 1):
         if not isinstance(raw, dict):
             raise ValueError(f"images[{index}] must be an object")
-        number = normalize_number(str(raw.get("number", f"A-{index}")))
+        number = normalize_number(str(raw.get("number", f"A-{index}")), caption_prefix)
         if number in seen_numbers:
             raise ValueError(f"Duplicate appendix figure number: {number}")
         seen_numbers.add(number)
@@ -412,7 +419,7 @@ def insert_appendix(
             )
         )
         if description:
-            nodes.append(text_paragraph(f"说明：{description}"))
+            nodes.append(text_paragraph(f"{description_prefix}{description}"))
         inserted.append(
             {
                 "number": number,
@@ -439,7 +446,7 @@ def insert_appendix(
         default_namespace=CT_NS,
     )
     output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output, "w") as archive:
+    with zipfile.ZipFile(output, "x") as archive:
         for name, data in contents.items():
             info = infos[name]
             archive.writestr(info, data)
@@ -463,6 +470,7 @@ def insert_appendix(
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     try:
         result = insert_appendix(

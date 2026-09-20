@@ -1,82 +1,50 @@
 # 运行环境与 Agent 兼容性
 
-## 首次运行
+## 基本能力与可选能力
 
-使用当前 Agent 可用的 Python 3.9 或更高版本运行：
-
-```bash
-python3 <skill-dir>/scripts/bootstrap_runtime.py --json
-```
-
-自举脚本会：
-
-1. 检查 Python 版本。
-2. 扫描 `scripts/` 的导入项。
-3. 区分标准库、本技能本地模块和第三方模块。
-4. 在发现第三方模块时，在用户缓存目录创建隔离虚拟环境。
-5. 自动安装缺少的软件包并返回应使用的 Python 路径。
-6. 校验随附的 `humanizer-zh` Skill 及其参考文件。
-7. 当前技能位于标准 `skills` 目录时，将缺少的 `humanizer-zh` 原子复制到同级目录。
-
-当前核心实现只使用标准库，因此全新环境不需要预装 `python-docx`、Pillow 或 PyYAML。Python 本身属于 Agent 运行时前提；在 Codex 桌面环境中优先通过工作区依赖加载器取得 Python。
-
-`humanizer-zh` 的完整副本位于 `vendor/humanizer-zh/`，保留原 MIT 许可证。自举结果会在 `skill_dependencies.humanizer-zh` 中返回使用模式和路径：
-
-- `installed`：Agent 可以按 `$humanizer-zh` 调用。
-- `bundled`：直接读取返回路径中的 `SKILL.md` 和参考文件。
-
-从普通 Git 仓库而不是标准技能目录运行时，可明确指定安装位置：
+核心脚本要求 Python 3.9+，全部使用标准库。默认检查无需网络、管理员权限、Office、特定 Agent SDK 或外部 Python 包。文档主体编写、格式导出和视觉检查由当前 Agent 的可用工具完成，本技能的辅助脚本不构成独立的一键报告生成器。
 
 ```bash
-python3 <skill-dir>/scripts/bootstrap_runtime.py \
-  --agent-skills-root <agent-skills-dir> --json
-```
-
-目标目录已有完整版本时直接复用；已有不完整或名称不一致的版本时不覆盖，转用内置副本。安装目录不可写时也转用内置副本，因此润色流程不依赖网络或人工安装。
-
-## 兼容性检查
-
-运行：
-
-```bash
+python3 <skill-dir>/scripts/bootstrap_runtime.py --check-only --json
 python3 <skill-dir>/scripts/check_skill_compatibility.py --json
 ```
 
-检查范围包括：
+Windows 使用 `py -3` 或实际 Python 路径。以命令参数数组调用脚本；在 PowerShell 或其他 shell 中对包含空格的路径按宿主规则引用。JSON 和命令行输出统一使用 UTF-8，支持读取带 BOM 的任务配置。相对路径遵循 [配置规则](configuration.md)。严格禁止任何缓存写入时通过 `python -B` 运行，避免解释器创建 `__pycache__`。
 
-- `SKILL.md` 前置元数据、目录名和行数
-- `agents/openai.yaml` 的显示名称、描述和默认提示词
-- 引用文件是否存在
-- 脚本语法、导入项和 `--help` 可运行性
-- 用户专属绝对路径
-- Codex、Agents、Claude 和插件缓存中的同名技能冲突
-- Python 运行时和可选外部工具
-- 内置 Skill 依赖的元数据、相对引用和可用模式
+## 默认只读与显式安装
 
-“兼容”表示技能本身没有结构、依赖或命名冲突。它不能证明未来未知 Agent 的私有接口永远不变化；每次安装或升级后都应重新运行检查。
+`bootstrap_runtime.py` 默认只检查依赖，不下载、不写 Agent 技能目录。`--check-only` 保留为明确只读的兼容参数。需要安装时使用 `--install`；`--offline` 阻止软件下载，但允许在显式安装模式下复制内置资源。
 
-## 能力降级
+```bash
+python3 <skill-dir>/scripts/bootstrap_runtime.py --install --agent-skills-root <skills-dir> --json
+```
 
-### 没有图像生成工具
+安装目标已有有效资源时复用；不兼容或不可写时直接读取内置副本，不覆盖。仅安装脚本中明确映射的软件包，未知模块返回错误，不根据模块名猜测下载包。安装失败返回结构化错误，保留可执行步骤。
 
-优先从 CAD 软件导出真实装配爆炸图。CAD 也不可用时，保留 `prepare_exploded_view.py` 生成的规范、零件清单和提示词，继续完成文字和附录，不生成伪造图片。
+缓存路径优先采用 `REPORT_SKILL_CACHE`，兼容旧 `CODEX_SKILL_CACHE`。未指定时使用 XDG 缓存、macOS 用户 Library/Caches、Windows LOCALAPPDATA 或 Linux 用户缓存目录，不要求目录属于 Codex。离线或只读任务不需要创建缓存。
 
-### 没有 DOCX 专用 Skill
+内置 `humanizer-zh` 随附 MIT 许可证。`installed` 表示读取已安装副本，`bundled` 表示读取返回的内置路径；任何 Agent 都可通过文件读取使用它，无需支持 `$humanizer-zh` 语法。损坏的资源会被报告，影响的润色步骤不能计为完成。非中文任务使用相应语言编辑方式。
 
-使用本技能标准库脚本完成资料盘点、参考报告分析、审计和附录图片插入。文档主体仍可使用 Agent 自带的 OOXML 或 Word 能力创建。
+## 检查范围
 
-### 没有 LibreOffice
+检查入口元数据、相对链接、脚本语法、标准库导入、脚本帮助和内置依赖。`agents/openai.yaml` 是可选的 Codex UI 元数据；存在时检查，不将其缺失视为通用技能不可运行。
 
-执行 DOCX 包结构、目录、交叉引用、表格和图片检查，并明确记录未完成页面渲染。LibreOffice 属于视觉验收增强能力，不是本技能脚本启动依赖。
+默认不遍历其他技能。需要排查副本时指定 `--scan-root <directory>`，或使用 `--scan-installed` 检查常见目录。同名副本只提示版本选择；不同 Agent 安装相同技能属于正常使用，不应让当前副本的检查失败。链接别名按实际路径去重，vendor 中的内置技能不计入外部冲突。
 
-### 没有数据可视化工具
+检查成功只表示当前文件结构与脚本接口通过检查，不代表所有 Agent 产品、Office 排版器或操作系统都已完成实机测试。自动化测试与待运行平台应分别记录。
 
-保留真实数据表和计算说明，不生成推测性图表。报告其他章节照常完成。
+## 能力不足时的处理
 
-## 安全边界
+| 条件 | 继续方式 | 交付时说明 |
+|---|---|---|
+| 无终端或 Python | 阅读用户提供的资料，按核心规则编写或审查 | 未运行脚本检查 |
+| 无 Git | 使用资料版本标记和上一版文档 | 不推断 Git 历史 |
+| 无图像生成 | 使用项目原图、Mermaid、SVG、CAD 导出或图表规范 | 不生成伪造实物和数据 |
+| 无文档写入或导出工具 | 完成内容和提纲；保留用户请求的格式 | 所需文件尚未生成 |
+| 无页面渲染工具 | 执行可用的结构检查 | 版式未验证；required 策略下仍未完成 |
+| 无数据 | 写测试设计与记录字段 | 不生成实测统计 |
+| 只读技能目录 | 使用内置资源，将工作文件写入项目可写目录 | 技能目录无须写入 |
+| 离线 | 使用本地资料、已有文献与内置资源 | 待补的外部资料 |
+| 未知 Agent | 读取 SKILL.md，使用标准文件接口 | 根据实际能力选择步骤 |
 
-- Python 包只安装到用户缓存中的隔离环境。
-- 随附 Skill 只在目标不存在时安装，不覆盖现有技能；安装失败时使用内置副本。
-- 不调用管理员权限，不改系统 Python。
-- 兼容性扫描只读访问其他技能目录。
-- 跨 Agent 传递使用普通 Markdown、JSON、DOCX 和图片文件，不依赖私有消息格式。
+LibreOffice、Word 或其他排版器均可承担渲染。发现可执行文件不代表渲染成功；用实际输出页面检查字体、分页、图表和目录。需要 LibreOffice 时使用无界面模式和临时隔离配置，遵守当前宿主权限；不自动启动 GUI 或修改全局设置。

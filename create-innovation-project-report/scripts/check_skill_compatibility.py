@@ -10,13 +10,14 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from portable_io import configure_utf8
 
 from bootstrap_runtime import bootstrap, imported_modules, stdlib_module_names
 
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-ABSOLUTE_PATH_RE = re.compile(r"(?:/Users/|/home/|[A-Za-z]:\\\\)")
+ABSOLUTE_PATH_RE = re.compile(r"(?:/Users/|/home/|[A-Za-z]:\\)")
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--scan-root", type=Path, action="append", default=[])
     parser.add_argument("--skip-script-help", action="store_true")
+    parser.add_argument("--scan-installed", action="store_true", help="Opt in to inspecting common local skill directories")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -52,7 +54,9 @@ def default_scan_roots() -> list[Path]:
         home / ".codex" / "skills",
         home / ".agents" / "skills",
         home / ".claude" / "skills",
-        home / ".codex" / "plugins" / "cache",
+        home / ".gemini" / "skills",
+        home / ".cursor" / "skills",
+        home / ".copilot" / "skills",
     ]
     return [path for path in candidates if path.is_dir()]
 
@@ -99,7 +103,7 @@ def check_agent_metadata(skill_root: Path, skill_name: str) -> list[str]:
     errors = []
     path = skill_root / "agents" / "openai.yaml"
     if not path.is_file():
-        return ["agents/openai.yaml is missing"]
+        return []  # Optional Codex UI metadata, not a cross-Agent runtime requirement.
     text = path.read_text(encoding="utf-8")
     for field in ("display_name", "short_description", "default_prompt"):
         if not re.search(rf"^\s*{field}:\s*\"[^\"]+\"\s*$", text, re.M):
@@ -114,27 +118,34 @@ def check_script_imports(skill_root: Path) -> tuple[list[str], list[str]]:
     local = {path.stem for path in scripts_dir.glob("*.py")}
     stdlib = stdlib_module_names()
     stdlib.add("__future__")
-    third_party = sorted(imported_modules(scripts_dir) - local - stdlib)
     syntax_errors = []
     for path in scripts_dir.glob("*.py"):
         try:
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except SyntaxError as error:
             syntax_errors.append(f"{path.name}: {error}")
+    third_party = sorted(imported_modules(scripts_dir) - local - stdlib) if not syntax_errors else []
     return third_party, syntax_errors
 
 
 def run_help_checks(skill_root: Path) -> list[str]:
     failures = []
     for script in sorted((skill_root / "scripts").glob("*.py")):
-        if script.name == "image_utils.py":
+        if script.name in {"image_utils.py", "report_config.py", "portable_io.py"}:
             continue
-        completed = subprocess.run(
-            [sys.executable, str(script), "--help"],
-            cwd=skill_root,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(script), "--help"],
+                cwd=skill_root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            failures.append(f"{script.name}: {error}")
+            continue
         if completed.returncode != 0:
             failures.append(f"{script.name}: {completed.stderr.strip()[:300]}")
     return failures
@@ -161,8 +172,8 @@ def check(skill_root: Path, scan_roots: list[Path], run_help: bool) -> dict:
     name = metadata.get("name", "")
     if not re.fullmatch(r"[a-z0-9-]{1,64}", name):
         errors.append("Skill name must use lowercase letters, digits, and hyphens")
-    if set(metadata) != {"name", "description"}:
-        errors.append("SKILL.md frontmatter must contain only name and description")
+    if not {"name", "description"}.issubset(metadata):
+        errors.append("SKILL.md frontmatter must contain name and description")
     if not metadata.get("description"):
         errors.append("Skill description is missing")
     if root.name != name:
@@ -182,12 +193,12 @@ def check(skill_root: Path, scan_roots: list[Path], run_help: bool) -> dict:
     if runtime["status"] != "ready":
         errors.append("Runtime bootstrap check failed")
 
-    roots = scan_roots or default_scan_roots()
+    roots = scan_roots
     names, scanned = scan_skill_names(roots)
     current_paths = [Path(path).resolve() for path in names.get(name, [])]
     collisions = [str(path) for path in current_paths if path != root]
     if collisions:
-        errors.append("Skill name collision: " + "; ".join(collisions))
+        warnings.append("Other copies found; select the intended version in this Agent: " + "; ".join(collisions))
 
     return {
         "status": "compatible" if not errors else "incompatible",
@@ -206,8 +217,13 @@ def check(skill_root: Path, scan_roots: list[Path], run_help: bool) -> dict:
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
-    result = check(args.skill_root, args.scan_root, not args.skip_script_help)
+    roots = args.scan_root or (default_scan_roots() if args.scan_installed else [])
+    try:
+        result = check(args.skill_root, roots, not args.skip_script_help)
+    except (OSError, ValueError, SyntaxError) as error:
+        result = {"status": "incompatible", "errors": [str(error)], "warnings": []}
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

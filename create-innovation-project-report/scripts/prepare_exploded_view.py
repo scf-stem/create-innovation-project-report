@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from portable_io import configure_utf8
 
 
 VALID_MODES = {"cad-native", "imagegen", "schematic"}
@@ -205,6 +206,7 @@ def prepare(manifest_path: Path) -> dict:
 
 
 def main() -> int:
+    configure_utf8()
     args = parse_args()
     if args.template:
         print(json.dumps(template(), ensure_ascii=False, indent=2))
