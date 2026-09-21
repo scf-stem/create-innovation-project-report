@@ -2,6 +2,8 @@
 
 将真实项目资料整理为综合实践报告的可移植 Skill。支持软件、硬件、实验研究、数据分析、产品设计及混合项目，适用于项目展示、阶段汇报和结项材料。
 
+当前版本：**1.1.0**（以 SKILL.md 的 `metadata.version` 标识）。本版补充成稿独立性、参考报告深度转化、实施过程细节、封面与署名、视频取帧裁切和修订保护规则，新增可选的 DOCX 图片依赖与资料叙述检查。规则按用户模板和项目资料应用，不绑定某个项目、人员或会议软件。
+
 默认生成中文 DOCX，并保留客观表述、通俗术语、修订记录、“项目名称_综合实践报告_日期或版本号”的命名和第一章起算页码规则。用户可配置其他语言、篇幅、模板及 Markdown/PDF 交付。核心辅助脚本使用 Python 3.9+ 标准库；报告内容生成、格式导出和页面检查由宿主 Agent 的实际工具完成。
 
 ## 使用方式
@@ -62,9 +64,17 @@ python3 create-innovation-project-report/scripts/plan_report.py --config report-
 | inspect_experiment_data.py | CSV/TSV 质量、数值格式与截断检查 |
 | prepare_exploded_view.py | CAD、图像生成和示意图的爆炸图规范 |
 | appendix_images.py | 真实图片、题注、替代文本和附录互引 |
-| audit_docx.py | 项目名称、目录域、图表引用、缩进和表格比较 |
+| audit_docx.py | 项目名称、目录域、图表引用、缩进、表格比较及可选的独立性检查 |
 
 各工具通过 `--help` 查看参数。图表资料不足时使用结构图、流程图或测试计划，保留实际结果与预期结果的区别。图片附录默认拒绝覆盖任何已有输出文件。
+
+对需要脱离源文件阅读的 DOCX，可运行：
+
+```bash
+python3 create-innovation-project-report/scripts/audit_docx.py report.docx --check-self-contained --json
+```
+
+该选项只读检查 Word 部件中的图片引用、包内媒体是否存在及是否依赖外部位置，同时提示需人工复核的资料来源叙述。图片关系损坏、缺失或外链导致非零退出码；措辞候选不导致失败，也不自动删除“记录”等词语。默认不开启此项。检查不联网，不验证图中文字、外部数据域或技术语义，不能据此宣称报告已经完整自洽。
 
 ## 扩展结构
 
@@ -77,7 +87,7 @@ python3 -m unittest discover -s create-innovation-project-report/tests -v
 python3 create-innovation-project-report/scripts/check_skill_compatibility.py --json
 ```
 
-测试涵盖原有 DOCX 附录与参考分析，以及任务配置、模式分流、Agent/项目类型组合、离线和只读检测、同名副本、路径带空格与中文、英文图表引用、缺损目录域、输出保护和地区数值格式。
+测试涵盖原有 DOCX 附录与参考分析，以及任务配置、模式分流、Agent/项目类型组合、离线和只读检测、同名副本、路径带空格与中文、英文图表引用、缺损目录域、输出保护和地区数值格式；独立性检查另覆盖内嵌与外链图片、丢失关系与媒体、正文以外部件、路径解析、措辞候选和合法术语保留。
 
 GitHub Actions 提供 Windows、macOS、Linux 与 Python 3.9/3.13 的运行矩阵。配置文件存在不等于远程 CI 已运行；以实际 Actions 结果为准。产品级 Agent 调用、Office 字体和真实分页仍需在相应宿主验证。
 

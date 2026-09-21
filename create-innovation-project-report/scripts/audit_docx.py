@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import posixpath
 import re
 import sys
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from portable_io import configure_utf8
 from xml.etree import ElementTree as ET
 
@@ -31,6 +33,25 @@ LABEL_TOKEN = r"(?:附图|图|表|\bAppendix Figure|\bFigure|\bFig\.|\bTable)"
 CAPTION_RE = re.compile(rf"^({LABEL_TOKEN})\s*({NUMBER_TOKEN})", re.I)
 REFERENCE_RE = re.compile(rf"({LABEL_TOKEN})\s*({NUMBER_TOKEN})", re.I)
 PROJECT_REPORT_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9·（）()_-]{2,50}项目综合实践报告)")
+OFFICE_REL_NAMESPACES = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships",
+)
+IMAGE_TAGS = {
+    "{http://schemas.openxmlformats.org/drawingml/2006/main}blip",
+    "{http://purl.oclc.org/ooxml/drawingml/main}blip",
+    "{http://schemas.microsoft.com/office/drawing/2016/SVG/main}svgBlip",
+    "{urn:schemas-microsoft-com:vml}imagedata",
+}
+# Advisory only: these patterns identify places to read, not words to delete.
+SOURCE_NARRATIVE_PATTERNS = (
+    re.compile(r"口述记录"),
+    re.compile(r"(?:现有|已有)(?:资料|记录).{0,24}(?:支持|表明|不足|不能证明)"),
+    re.compile(r"(?:\d{4}年\d{1,2}月\d{1,2}日|\d{4}[-/]\d{1,2}[-/]\d{1,2})的?设计截图"),
+    re.compile(r"(?:详见|参见|请查阅)(?:外部|另附).{0,20}(?:文件|附件|录像|视频)"),
+    re.compile(r"\b(?:according to|as (?:noted|shown) in) the (?:recording|transcript)\b", re.I),
+    re.compile(r"\b(?:see|refer to) the external (?:file|attachment|recording)\b", re.I),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +77,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-toc", action="store_true", help="Require an updateable TOC field")
     parser.add_argument("--check-cross-references", action="store_true")
     parser.add_argument("--check-body-indent", action="store_true")
+    parser.add_argument(
+        "--check-self-contained", action="store_true",
+        help="Check image dependencies and suggest source-narrative review (read-only, no network)",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     return parser.parse_args()
 
@@ -126,6 +151,103 @@ def package_texts(docx: Path) -> dict[str, str]:
     return texts
 
 
+def self_containment_status(docx: Path) -> dict:
+    """Check referenced images and flag prose for review; not a semantic completeness test."""
+    errors, candidates = [], []
+    reference_count = 0
+    with zipfile.ZipFile(docx) as archive:
+        members = set(archive.namelist())
+        for part in sorted(name for name in members if name.startswith("word/") and name.endswith(".xml")):
+            try:
+                root = ET.fromstring(archive.read(part))
+            except ET.ParseError:
+                errors.append({"part": part, "kind": "unreadable_xml"})
+                continue
+
+            # Historical revision descriptions are not current body prose.
+            revision_paragraphs = set()
+            for table in root.findall(".//w:tbl", NS):
+                first_row = table.find("w:tr", NS)
+                if first_row is None:
+                    continue
+                headers = text_of(first_row).lower()
+                if (
+                    all(term in headers for term in ("版本", "日期", "修订"))
+                    or all(term in headers for term in ("version", "date", "change"))
+                ):
+                    revision_paragraphs.update(table.findall(".//w:p", NS))
+            for index, paragraph in enumerate(root.findall(".//w:p", NS)):
+                value = text_of(paragraph)
+                if paragraph not in revision_paragraphs and any(
+                    pattern.search(value) for pattern in SOURCE_NARRATIVE_PATTERNS
+                ):
+                    candidates.append({"part": part, "paragraph_index": index, "text": value[:240]})
+
+            refs = []
+            for node in root.iter():
+                if node.tag not in IMAGE_TAGS:
+                    continue
+                found = False
+                for namespace in OFFICE_REL_NAMESPACES:
+                    for attribute in ("embed", "link", "id"):
+                        rid = node.get(f"{{{namespace}}}{attribute}")
+                        if rid is not None:
+                            refs.append(rid)
+                            found = True
+                # VML also permits a direct source instead of a relationship.
+                if node.tag == "{urn:schemas-microsoft-com:vml}imagedata":
+                    source = node.get("src")
+                    if source:
+                        errors.append({"part": part, "kind": "unresolved_image_source", "target": source})
+                        found = True
+                if not found:
+                    errors.append({"part": part, "kind": "missing_image_reference"})
+            reference_count += len(refs)
+            if not refs:
+                continue
+            rel_part = posixpath.join(posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels")
+            relationships = {}
+            if rel_part in members:
+                try:
+                    rel_root = ET.fromstring(archive.read(rel_part))
+                    relationships = {node.get("Id"): node for node in rel_root if node.tag == f"{{{REL_NS}}}Relationship"}
+                except ET.ParseError:
+                    errors.append({"part": rel_part, "kind": "unreadable_relationships"})
+            for rid in refs:
+                finding = {"part": part, "relationship_id": rid}
+                relation = relationships.get(rid)
+                if relation is None:
+                    errors.append({**finding, "kind": "missing_relationship"})
+                    continue
+                target = relation.get("Target", "")
+                finding["target"] = target
+                if relation.get("Type") not in {namespace + "/image" for namespace in OFFICE_REL_NAMESPACES}:
+                    errors.append({**finding, "kind": "wrong_relationship_type"})
+                    continue
+                try:
+                    uri = urlsplit(target)
+                except ValueError:
+                    errors.append({**finding, "kind": "invalid_image_target"})
+                    continue
+                if relation.get("TargetMode", "").lower() == "external" or uri.scheme or uri.netloc:
+                    errors.append({**finding, "kind": "external_image"})
+                    continue
+                path = unquote(uri.path)
+                resolved = posixpath.normpath(
+                    path.lstrip("/") if path.startswith("/") else posixpath.join(posixpath.dirname(part), path)
+                )
+                if not path or "\\" in path or "\x00" in path or resolved == ".." or resolved.startswith("../"):
+                    errors.append({**finding, "kind": "invalid_image_target"})
+                elif resolved not in members or resolved.endswith("/"):
+                    errors.append({**finding, "kind": "missing_image_part", "resolved_part": resolved})
+    return {
+        "image_reference_count": reference_count,
+        "image_dependency_errors": errors,
+        "source_narrative_candidates": candidates,
+        "scope": "Image relationships and advisory prose only; semantic and visual review still required.",
+    }
+
+
 def toc_status(docx: Path) -> dict:
     root = open_xml(docx, "word/document.xml")
     instructions, stack = [], []
@@ -187,6 +309,7 @@ def audit(
     require_toc: bool = False,
     check_cross_references: bool = False,
     check_body_indent: bool = False,
+    check_self_contained: bool = False,
 ) -> dict:
     root = open_xml(docx, "word/document.xml")
     body = root.find("w:body", NS)
@@ -295,7 +418,7 @@ def audit(
     missing_cross_refs = sorted(body_refs - caption_refs) if check_cross_references else []
     unreferenced_captions = sorted(caption_refs - body_refs) if check_cross_references else []
 
-    return {
+    result = {
         "path": str(docx.resolve()),
         "paragraph_count": len(all_paragraphs),
         "body_paragraph_count": len(body_paragraphs),
@@ -334,8 +457,12 @@ def audit(
             "require_toc": require_toc,
             "check_cross_references": check_cross_references,
             "check_body_indent": check_body_indent,
+            "check_self_contained": check_self_contained,
         },
     }
+    if check_self_contained:
+        result["self_containment"] = self_containment_status(docx)
+    return result
 
 
 def main() -> int:
@@ -357,6 +484,7 @@ def main() -> int:
         require_toc=args.require_toc,
         check_cross_references=args.check_cross_references,
         check_body_indent=args.check_body_indent,
+        check_self_contained=args.check_self_contained,
     )
 
     if args.compare_tables_with:
@@ -419,6 +547,15 @@ def main() -> int:
             )
         if "comparison_tables" in result:
             print("表格与上一版一致: " + ("是" if result["comparison_tables"]["matches"] else "否"))
+        if args.check_self_contained:
+            status = result["self_containment"]
+            print(f"图片依赖问题: {len(status['image_dependency_errors'])}")
+            for finding in status["image_dependency_errors"]:
+                print("- " + json.dumps(finding, ensure_ascii=False))
+            print(f"资料叙述候选（仅供人工复核）: {len(status['source_narrative_candidates'])}")
+            for candidate in status["source_narrative_candidates"]:
+                print(f"- {candidate['part']}[{candidate['paragraph_index']}]: {candidate['text']}")
+            print("此检查不验证图中文字、全部外部对象或技术语义完整性。")
 
     has_error = bool(result["missing_required_headings"] or result["forbidden_hits"])
     identity = result["project_identity"]
@@ -433,6 +570,8 @@ def main() -> int:
     if args.check_body_indent and result["body_indent"]["failure_count"]:
         has_error = True
     if "comparison_tables" in result and not result["comparison_tables"]["matches"]:
+        has_error = True
+    if args.check_self_contained and result["self_containment"]["image_dependency_errors"]:
         has_error = True
     return 1 if has_error else 0
 
