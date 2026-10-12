@@ -2,7 +2,9 @@
 
 将真实项目资料整理为综合实践报告的可移植 Skill。支持软件、硬件、实验研究、数据分析、产品设计及混合项目，适用于项目展示、阶段汇报和结项材料。
 
-当前版本：**1.1.0**（以 SKILL.md 的 `metadata.version` 标识）。本版补充成稿独立性、参考报告深度转化、实施过程细节、封面与署名、视频取帧裁切和修订保护规则，新增可选的 DOCX 图片依赖与资料叙述检查。规则按用户模板和项目资料应用，不绑定某个项目、人员或会议软件。
+当前版本：**1.1.3**（以 SKILL.md 的 `metadata.version` 标识）。本版补充正式中文报告的中西文字体设置与验收，统一使用 imagegen 生成或重绘示意配图，并按图类型采用可核验的工程与论文画法。规则按用户模板、机构要求和项目资料应用，不绑定某个项目、人员或会议软件。
+
+未提供机构字体细则时，中文正文采用宋体、标题采用黑体，英文及数字采用 Times New Roman；检查实际字体、目录更新及最终渲染，详见 [论文式中西文字体与检查](create-innovation-project-report/references/academic-fonts.md)。流程、状态、时序、接口、结构与爆炸等新增或重绘示意图须采用 imagegen，以 PNG/JPEG 内嵌，禁止 SVG 及其转码替代；真实照片、界面截图、已有 CAD 成果与真实数据图表按证据规则处理。图类型、规范版本、符号与连线验收见 [工程与论文配图画法](create-innovation-project-report/references/engineering-diagram-conventions.md)。
 
 默认生成中文 DOCX，并保留客观表述、通俗术语、修订记录、“项目名称_综合实践报告_日期或版本号”的命名和第一章起算页码规则。用户可配置其他语言、篇幅、模板及 Markdown/PDF 交付。核心辅助脚本使用 Python 3.9+ 标准库；报告内容生成、格式导出和页面检查由宿主 Agent 的实际工具完成。
 
@@ -62,7 +64,7 @@ python3 create-innovation-project-report/scripts/plan_report.py --config report-
 | inventory_project.py | 资料盘点、去重、图片元数据和目录排除 |
 | analyze_reference_docx.py | 参考报告的标题、篇幅、表格和图片分析 |
 | inspect_experiment_data.py | CSV/TSV 质量、数值格式与截断检查 |
-| prepare_exploded_view.py | CAD、图像生成和示意图的爆炸图规范 |
+| prepare_exploded_view.py | 爆炸图参考资料、规范与 imagegen 提示词准备 |
 | appendix_images.py | 真实图片、题注、替代文本和附录互引 |
 | audit_docx.py | 项目名称、目录域、图表引用、缩进、表格比较及可选的独立性检查 |
 
