@@ -15,7 +15,7 @@ DEFAULTS = {
     "output": {"directory": "output/doc", "format": "docx", "report_label": "综合实践报告", "date": None, "version": None},
     "document": {"paper": "A4", "toc": True, "revision_history": True, "body_page_start": 1, "font": None},
     "modules": {"data": "auto", "visuals": "auto", "appendix": "auto", "polish": "auto"},
-    "quality": {"render": "preferred", "max_pages_without_visual": 3},
+    "quality": {"render": "preferred", "max_pages_without_visual": 3, "content_profile": "project_only", "forbidden_reference_titles": []},
     "runtime": {"agent": "generic", "offline": False, "capabilities": {"document_writer": "auto", "renderer": "auto", "image_generation": "auto"}},
     "extensions": {},
 }
@@ -88,6 +88,10 @@ def load_config(path: Path | None = None, overrides: dict | None = None) -> dict
     choice(output["format"], {"docx", "markdown", "pdf"}, "output.format")
     choice(config["document"]["paper"], {"A4", "Letter"}, "document.paper")
     choice(config["quality"]["render"], {"required", "preferred", "skip"}, "quality.render")
+    choice(config["quality"]["content_profile"], {"project_only", "progress"}, "quality.content_profile")
+    reference_titles = config["quality"]["forbidden_reference_titles"]
+    if not isinstance(reference_titles, list) or any(not isinstance(title, str) or not title.strip() for title in reference_titles):
+        raise ValueError("quality.forbidden_reference_titles must be a list of nonempty titles")
     choice(config["runtime"]["agent"], AGENTS, "runtime.agent")
     for group in (config["modules"], config["runtime"]["capabilities"]):
         for key, value in group.items():

@@ -2,7 +2,7 @@
 
 将项目资料、工程日志、测试记录和参考样例整理为正式的综合实践报告，也可用于修订成稿、审查文档、编制提纲和优化配图。
 
-技能名称：`create-innovation-project-report` · 当前版本：**1.1.3** · 默认交付：**中文、可编辑 DOCX**
+技能名称：`create-innovation-project-report` · 当前版本：**1.1.4** · 默认交付：**中文、可编辑 DOCX**
 
 [快速开始](#快速开始) · [Agent 执行入口](#agent-执行入口) · [交付与验收](#交付与验收) · [工具与配置](#工具与配置)
 
@@ -19,6 +19,10 @@
 | 改善配图和图文关系 | `visuals` | 配图、题注、正文引用及受影响的文档内容 |
 
 用户指定的模板、章节、篇幅和本轮修改范围优先。技术描述、参数与测试结论均须有本项目资料支持。
+
+正式报告默认采用 `project_only` 内容模式：聚焦项目实现、架构、功能、设计和成果；不写待完成、待验证、待测或未覆盖目标；参考文献只收录项目技术资料；必要信息在正文和图表中讲清，读者无需打开外部写作材料即可理解项目。
+
+资料不足时只写有依据的事实、技术原理或设计说明，不补造实测数据或完成结论。项目处于方案或原型阶段不会自动切换内容模式；只有用户明确要求进度、未完成事项或未来规划时才采用 `progress`，参考文献与独立性要求仍保留。
 
 ## 快速开始
 
@@ -72,6 +76,7 @@
 
 | 要处理的内容 | 读取的规则 |
 |---|---|
+| 成稿范围、参考文献与内容验收 | [成稿内容与检查](create-innovation-project-report/references/content-policy.md) |
 | 章节组织与参考样例 | [报告结构](create-innovation-project-report/references/report-structure.md)、[参考报告分析](create-innovation-project-report/references/reference-report-analysis.md) |
 | 项目事实与技术叙述 | [资料与表述](create-innovation-project-report/references/evidence-writing.md)、[技术实现](create-innovation-project-report/references/technical-narrative.md) |
 | 中西文字体 | [论文式字体与检查](create-innovation-project-report/references/academic-fonts.md) |
@@ -98,7 +103,7 @@
 
 ### 交付前检查
 
-- **内容：** 名称、版本、技术关系与测试结论一致；引用有来源，数值和单位准确。
+- **内容：** 名称、版本、技术关系与测试结论一致；引用有来源，数值和单位准确。默认成稿执行四条内容规则，参考样例与写作材料只留在内部来源清单。
 - **文档：** 表格和图片完整，目录及交叉引用正确，字体与页码符合本轮要求。
 - **页面：** 完整检查新文档或全局排版变化；局部修改检查受影响内容和后续分页。
 
@@ -129,7 +134,11 @@ python3 create-innovation-project-report/scripts/check_skill_compatibility.py --
   "project": {"name": "示例项目", "root": "./project"},
   "task": {"mode": "create", "language": "zh-CN"},
   "output": {"format": "docx"},
-  "quality": {"render": "required"}
+  "quality": {
+    "render": "required",
+    "content_profile": "project_only",
+    "forbidden_reference_titles": ["参考样例.docx"]
+  }
 }
 ```
 
@@ -139,15 +148,19 @@ python3 create-innovation-project-report/scripts/plan_report.py --config report-
 
 `project.root` 相对配置文件目录解析，输出目录相对项目根目录解析。计划用于明确模块、输入输出和执行条件；Agent 仍须执行计划并生成文档。全部字段与模式要求见 [配置与模块接口](create-innovation-project-report/references/configuration.md)。
 
+`forbidden_reference_titles` 填入本轮提供的排版样例和写作材料标题。执行计划会将内容模式和禁用标题传入审计选项，并列出需要人工核对的内容要求。
+
 ### 检查已有 DOCX
 
 以下示例假设仓库根目录已有 `report.docx`：
 
 ```bash
-python3 create-innovation-project-report/scripts/audit_docx.py report.docx --require-toc --check-cross-references --check-body-indent --check-self-contained --json
+python3 create-innovation-project-report/scripts/audit_docx.py report.docx --project-report --require-toc --check-cross-references --check-body-indent --check-self-contained --forbid-reference-title "参考样例.docx" --json
 ```
 
-审计检查目录域、图表互引、正文缩进与图片依赖。发现结构错误或缺少要求的目录设置时返回非零退出码，并在 JSON 中列出问题。字体、图中文字、技术语义和实际分页由相应检查及页面复核完成。
+审计只读检查目录域、图表互引、正文缩进与图片依赖。`--project-report` 自动启用成稿内容检查，也可单独使用 `--check-content-policy`。发现结构错误、缺少要求的目录设置或命中内容违规规则时返回非零退出码，并在 JSON 中列出问题。明确的进度任务可传入 `--content-profile progress`；`--forbid-reference-title` 可重复指定。
+
+自动检查用于发现可识别的问题，不能证明技术事实、语义完整性或图内文字全部合格。字体、图中文字、技术语义和实际分页仍须人工核对与页面复核。
 
 <details>
 <summary>查看全部常用辅助脚本</summary>
@@ -162,7 +175,7 @@ python3 create-innovation-project-report/scripts/audit_docx.py report.docx --req
 | `inspect_experiment_data.py` | 检查 CSV/TSV 质量与数值格式 |
 | `prepare_exploded_view.py` | 准备爆炸图参考资料、规范及 imagegen 提示词 |
 | `appendix_images.py` | 整理真实图片、题注、替代文本和附录互引 |
-| `audit_docx.py` | 审计项目名称、目录、互引、缩进、表格及图片依赖 |
+| `audit_docx.py` | 审计项目名称、目录、互引、缩进、表格、图片依赖及成稿内容规则 |
 
 参数和输入格式通过各脚本的 `--help` 查看。
 
@@ -175,7 +188,7 @@ python3 -m unittest discover -s create-innovation-project-report/tests -v
 python3 create-innovation-project-report/scripts/check_skill_compatibility.py --json
 ```
 
-自动化测试覆盖配置、任务模式、跨平台路径、输入输出保护、DOCX 附录、参考报告分析和图片依赖审查。[GitHub Actions](https://github.com/scf-stem/create-innovation-project-report/actions) 使用 Windows、macOS、Linux 与 Python 3.9/3.13 的六组组合；以实际运行结果为准。宿主 Agent 的工具调用、Office 字体和真实分页在具体报告任务中验证。
+自动化测试覆盖配置、任务模式、跨平台路径、输入输出保护、DOCX 附录、参考报告分析、图片依赖，以及成稿内容模式、写作材料文献排除和外部内容依赖检查。[GitHub Actions](https://github.com/scf-stem/create-innovation-project-report/actions) 使用 Windows、macOS、Linux 与 Python 3.9/3.13 的六组组合；以实际运行结果为准。宿主 Agent 的工具调用、Office 字体和真实分页在具体报告任务中验证。
 
 ## 第三方资源
 

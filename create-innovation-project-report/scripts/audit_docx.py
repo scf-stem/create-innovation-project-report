@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from portable_io import configure_utf8
+from report_content_policy import CONTENT_PROFILES, content_policy_status
 from xml.etree import ElementTree as ET
 
 
@@ -77,6 +78,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-toc", action="store_true", help="Require an updateable TOC field")
     parser.add_argument("--check-cross-references", action="store_true")
     parser.add_argument("--check-body-indent", action="store_true")
+    parser.add_argument("--check-content-policy", action="store_true", help="Check project-focused content; enabled by --project-report")
+    parser.add_argument("--content-profile", choices=sorted(CONTENT_PROFILES), default="project_only", help="project_only by default; progress only for explicitly requested progress reports")
+    parser.add_argument("--forbid-reference-title", action="append", default=[], help="Writing template/material title forbidden in the bibliography; repeat per document")
     parser.add_argument(
         "--check-self-contained", action="store_true",
         help="Check image dependencies and suggest source-narrative review (read-only, no network)",
@@ -310,6 +314,9 @@ def audit(
     check_cross_references: bool = False,
     check_body_indent: bool = False,
     check_self_contained: bool = False,
+    check_content_policy: bool = False,
+    content_profile: str = "project_only",
+    forbidden_reference_titles: list[str] | None = None,
 ) -> dict:
     root = open_xml(docx, "word/document.xml")
     body = root.find("w:body", NS)
@@ -458,10 +465,13 @@ def audit(
             "check_cross_references": check_cross_references,
             "check_body_indent": check_body_indent,
             "check_self_contained": check_self_contained,
+            "check_content_policy": check_content_policy,
         },
     }
     if check_self_contained:
         result["self_containment"] = self_containment_status(docx)
+    if check_content_policy:
+        result["content_policy"] = content_policy_status(docx, content_profile, forbidden_reference_titles)
     return result
 
 
@@ -485,6 +495,9 @@ def main() -> int:
         check_cross_references=args.check_cross_references,
         check_body_indent=args.check_body_indent,
         check_self_contained=args.check_self_contained,
+        check_content_policy=args.project_report or args.check_content_policy or bool(args.forbid_reference_title),
+        content_profile=args.content_profile,
+        forbidden_reference_titles=args.forbid_reference_title,
     )
 
     if args.compare_tables_with:
@@ -556,6 +569,12 @@ def main() -> int:
             for candidate in status["source_narrative_candidates"]:
                 print(f"- {candidate['part']}[{candidate['paragraph_index']}]: {candidate['text']}")
             print("此检查不验证图中文字、全部外部对象或技术语义完整性。")
+        if "content_policy" in result:
+            status = result["content_policy"]
+            print(f"成稿内容检查（{status['profile']}）: " + ("通过" if status["passed"] else "未通过"))
+            for finding in status["findings"]:
+                print("- " + json.dumps(finding, ensure_ascii=False))
+            print("技术真实性、参考文献相关性及全文自解释性仍须人工核对。")
 
     has_error = bool(result["missing_required_headings"] or result["forbidden_hits"])
     identity = result["project_identity"]
@@ -572,6 +591,8 @@ def main() -> int:
     if "comparison_tables" in result and not result["comparison_tables"]["matches"]:
         has_error = True
     if args.check_self_contained and result["self_containment"]["image_dependency_errors"]:
+        has_error = True
+    if "content_policy" in result and not result["content_policy"]["passed"]:
         has_error = True
     return 1 if has_error else 0
 

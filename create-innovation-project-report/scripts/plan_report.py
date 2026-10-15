@@ -74,6 +74,15 @@ def build_plan(config: dict) -> dict:
         if name == "audit" and step_format != "docx":
             entry["script"] = None
             entry["reason"] = "audit the requested format; do not pass it to the DOCX checker"
+        if name == "audit":
+            entry["content_profile"] = config["quality"]["content_profile"]
+            entry["forbidden_reference_titles"] = config["quality"]["forbidden_reference_titles"]
+            entry["manual_content_review"] = "Check implementation/architecture/functions/design/achievements, technical references, self-contained explanations and source support"
+            if step_format == "docx":
+                options = ["--project-report", "--check-content-policy", "--content-profile", entry["content_profile"], "--check-self-contained"]
+                for title in entry["forbidden_reference_titles"]:
+                    options.extend(["--forbid-reference-title", title])
+                entry["audit_options"] = options
         if name == "render":
             policy = config["quality"]["render"]
             if fmt == "markdown":

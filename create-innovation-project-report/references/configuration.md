@@ -62,6 +62,8 @@ python3 <skill-dir>/scripts/plan_report.py --config report-config.json --output 
 | `modules.data/visuals/appendix/polish` | true、false、`auto`；auto 按真实资料与本轮改动选择 |
 | `quality.render` | `required/preferred/skip`；默认 preferred，跳过与缺失均不得声称检查通过 |
 | `quality.max_pages_without_visual` | 默认 3；分页正文配图密度目标，不用于凑页数 |
+| `quality.content_profile` | 默认 `project_only`；执行四条成稿规则。仅用户明确要求进度及未完成事项时选 `progress`，项目阶段不自动切换 |
+| `quality.forbidden_reference_titles` | 排版样例和写作材料标题数组，默认 `[]`；在参考文献中禁用，技术手册不加入 |
 | `runtime.agent` | `generic/codex/claude-code/gemini-cli/cursor/copilot`，只用于接入识别 |
 | `runtime.offline` | 默认 false；true 时所有步骤使用本地资料，禁止下载 |
 | `runtime.capabilities` | `document_writer/renderer/image_generation` 为 true、false 或 auto |
@@ -77,7 +79,7 @@ python3 <skill-dir>/scripts/plan_report.py --config report-config.json --output 
 - 内容增强：data、visuals、polish、appendix，按材料与配置选用。
 - 文档交付：document、audit、render，使用目标格式和质量要求。
 
-Agent 执行模块时将计划中的对应配置传给实际工具。例如 document 读取纸张、字体、目录和页码设置；audit 只对 DOCX 调用 `audit_docx.py`；render 调用可用排版器并检查页面。现有脚本 CLI 保持独立可用，计划不代替实际工作。
+Agent 执行模块时将计划中的对应配置传给实际工具。例如 document 读取纸张、字体、目录和页码设置；audit 对 DOCX 调用 `audit_docx.py`，传入计划的 `audit_options`（包括内容模式和禁用文献标题），按 `manual_content_review` 完成语义核对；render 调用可用排版器并检查页面。Markdown/PDF 对同样四条规则进行目标格式检查。计划不代替实际工作。
 
 新增模块时添加清晰的输入输出、参考说明、失败处理和行为测试，再加入适用任务组合。新增组织配置放在 `extensions.<组织名>`，明确由哪个适配器解释；核心字段改变含义时提升 schema 版本并提供迁移规则。新增输出后端要验证其目录、字体、图表和页码能力，不能仅增加一个格式名称。
 
